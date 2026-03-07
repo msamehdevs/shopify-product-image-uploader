@@ -1,0 +1,7 @@
+-- CreateTable
+CREATE TABLE "UploadJob" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "shop" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'Processing',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
