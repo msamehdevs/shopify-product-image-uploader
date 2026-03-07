@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { AppProvider, Page, Layout, Card, DropZone, BlockStack, Text, Button, IndexTable, Badge } from "@shopify/polaris";
 import enTranslations from "@shopify/polaris/locales/en.json";
-import { useSubmit, useActionData, useLoaderData, json } from "react-router"; 
+import { useSubmit, useActionData, useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 import db from "../db.server"; 
@@ -28,7 +28,7 @@ export const loader = async ({ request }) => {
     orderBy: { createdAt: "desc" },
   });
 
-  return json({ jobs });
+  return { jobs };
 };
 
 export const action = async ({ request }) => {
@@ -65,9 +65,9 @@ export const action = async ({ request }) => {
       headers: { "Content-Type": "application/json" },
       body: finalPayload
     });
-    return json({ success: true });
+    return { success: true };
   } catch (error) {
-    return json({ success: false, error: error.message });
+    return { success: false, error: error.message };
   }
 };
 
