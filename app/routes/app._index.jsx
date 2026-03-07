@@ -5,6 +5,7 @@ import { useSubmit, useActionData, useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 import prisma from "../db.server";
+import db from "../db.server";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
@@ -13,7 +14,7 @@ export const loader = async ({ request }) => {
   
   // 1. CLEANUP GHOSTS: 
   // Any job older than 10 minutes still "PROCESSING" is dead.
-  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+  const tenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
   
   await db.uploadJob.updateMany({
     where: {
