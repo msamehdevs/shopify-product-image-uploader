@@ -1,25 +1,22 @@
 import { useState, useCallback } from "react";
 import { AppProvider, Page, Layout, Card, DropZone, BlockStack, Text, Button, IndexTable, Badge } from "@shopify/polaris";
 import enTranslations from "@shopify/polaris/locales/en.json";
-import { useSubmit, useActionData, useLoaderData } from "react-router";
+import { useSubmit, useActionData, useLoaderData, json } from "react-router"; 
 import { authenticate } from "../shopify.server";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
-import prisma from "../db.server";
-import db from "../db.server";
+import db from "../db.server"; 
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
   
-  // 1. CLEANUP GHOSTS: 
-  // Any job older than 10 minutes still "PROCESSING" is dead.
-  const tenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+  const timeoutLimit = new Date(Date.now() - 15 * 60 * 1000);
   
   await db.uploadJob.updateMany({
     where: {
       status: "PROCESSING",
-      createdAt: { lt: tenMinutesAgo },
+      createdAt: { lt: timeoutLimit },
       shop: session.shop
     },
     data: { status: "FAILED" }
@@ -38,7 +35,6 @@ export const action = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
   const { shop, accessToken } = session;
 
-  // 1. Ask Shopify for the store owner's email
   const shopQuery = await admin.graphql(`
     #graphql
     query { shop { email } }
@@ -46,24 +42,21 @@ export const action = async ({ request }) => {
   const shopData = await shopQuery.json();
   const storeOwnerEmail = shopData.data.shop.email;
 
-  // 2. CREATE THE DATABASE RECORD! (Status defaults to "Processing")
-  const newJob = await prisma.uploadJob.create({
+  // Using 'db' here too for consistency
+  const newJob = await db.uploadJob.create({
     data: { shop: shop },
   });
 
   const formData = await request.formData();
   const rawPayload = formData.get("payload");
 
-  // 3. Open the package and add our keys, email, AND the new database Job ID
   const parsedPayload = JSON.parse(rawPayload);
   parsedPayload.shop = shop;
   parsedPayload.accessToken = accessToken;
   parsedPayload.email = storeOwnerEmail;
-  parsedPayload.jobId = newJob.id; // Boom! We pass the ID to n8n.
+  parsedPayload.jobId = newJob.id; 
 
   const finalPayload = JSON.stringify(parsedPayload);
-
-  // 4. Send it to n8n
   const n8nUrl = "https://n8n.n8nexperts.org/webhook/fe1f8f1c-0983-42d0-b013-dc559b612735";
 
   try {
@@ -72,16 +65,15 @@ export const action = async ({ request }) => {
       headers: { "Content-Type": "application/json" },
       body: finalPayload
     });
-    return { success: true };
+    return json({ success: true });
   } catch (error) {
-    return { success: false, error: error.message };
+    return json({ success: false, error: error.message });
   }
 };
 
 export default function Index() {
   const { jobs } = useLoaderData();
   const [files, setFiles] = useState([]);
-
   const submit = useSubmit();
   const actionData = useActionData();
 
@@ -114,7 +106,6 @@ export default function Index() {
   };
 
   return (
-    // 3. We wrap our entire UI inside the AppProvider and feed it the English translations
     <AppProvider i18n={enTranslations}>
       <Page title="Batch Image Uploader">
         <BlockStack gap="500">
@@ -123,7 +114,6 @@ export default function Index() {
               <Card>
                 <BlockStack gap="400">
                   <Text as="h2" variant="headingMd">Upload Product Images</Text>
-
                   <DropZone onDrop={handleDropZoneDrop}>
                     {files.length === 0 && <DropZone.FileUpload />}
                     {files.length > 0 && (
@@ -132,7 +122,6 @@ export default function Index() {
                       </div>
                     )}
                   </DropZone>
-
                   <Button
                     variant="primary"
                     onClick={handleUpload}
@@ -140,9 +129,8 @@ export default function Index() {
                   >
                     Upload Images
                   </Button>
-
                   {actionData?.success && (
-                    <Text tone="success">Images successfully sent to n8n for processing!</Text>
+                    <Text tone="success">Images successfully sent for processing!</Text>
                   )}
                 </BlockStack>
               </Card>
@@ -161,7 +149,6 @@ export default function Index() {
                     selectable={false}
                   >
                     {jobs.map((job) => {
-                      // 1. Calculate the duration in seconds
                       const durationInSeconds = job.completedAt
                         ? Math.floor((new Date(job.completedAt) - new Date(job.createdAt)) / 1000)
                         : null;
@@ -177,17 +164,14 @@ export default function Index() {
                           <IndexTable.Cell>
                             {job.completedAt ? new Date(job.completedAt).toLocaleTimeString() : "—"}
                           </IndexTable.Cell>
-
-                          {/* 2. Display the Duration dynamically */}
                           <IndexTable.Cell>
                             {durationInSeconds !== null
                               ? `${durationInSeconds}s`
                               : <Text tone="subdued">Calculated on finish</Text>
                             }
                           </IndexTable.Cell>
-
                           <IndexTable.Cell>
-                            <Badge tone={job.status === "Complete" ? "success" : "info"}>
+                            <Badge tone={job.status === "COMPLETED" ? "success" : job.status === "FAILED" ? "critical" : "info"}>
                               {job.status}
                             </Badge>
                           </IndexTable.Cell>
