@@ -9,15 +9,28 @@ import prisma from "../db.server";
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }) => {
-  const { session } = await authenticate.admin(request);
-
-  // Ask Prisma for all jobs for this specific store, sorted by newest first
-  const jobs = await prisma.uploadJob.findMany({
-    where: { shop: session.shop },
-    orderBy: { createdAt: 'desc' },
+  const { admin, session } = await authenticate.admin(request);
+  
+  // 1. CLEANUP GHOSTS: 
+  // Any job older than 10 minutes still "PROCESSING" is dead.
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+  
+  await db.uploadJob.updateMany({
+    where: {
+      status: "PROCESSING",
+      createdAt: { lt: tenMinutesAgo },
+      shop: session.shop
+    },
+    data: { status: "FAILED" }
   });
 
-  return { jobs };
+  // 2. FETCH UPDATED JOBS
+  const jobs = await db.uploadJob.findMany({
+    where: { shop: session.shop },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return json({ jobs });
 };
 
 export const action = async ({ request }) => {
