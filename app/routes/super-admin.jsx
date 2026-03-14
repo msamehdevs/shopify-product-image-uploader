@@ -65,12 +65,16 @@ export const action = async ({ request }) => {
 
     if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
       const session = await getSession(request.headers.get("Cookie"));
-      session.set("adminAuthenticated", true);
+      session.set("adminAuthenticated", "true");
+      console.log("Login successful, committing session...");
       return redirect("/super-admin", {
-        headers: { "Set-Cookie": await commitSession(session) },
+        headers: { 
+          "Set-Cookie": await commitSession(session) 
+        },
       });
     }
-    return { error: "Invalid credentials" };
+    console.log("Login failed: Invalid credentials");
+    return { error: "Invalid username or password" };
   }
 
   if (actionType === "logout") {
