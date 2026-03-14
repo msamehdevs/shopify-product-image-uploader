@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from "react";
-import { AppProvider, Page, Layout, Card, DropZone, BlockStack, Text, Button, IndexTable, Badge, Pagination, Select, InlineStack } from "@shopify/polaris";
+import { AppProvider, Page, Layout, Card, DropZone, BlockStack, Text, Button, IndexTable, Badge, Pagination, Select, InlineStack, Banner } from "@shopify/polaris";
 import { DeleteIcon } from "@shopify/polaris-icons";
 import enTranslations from "@shopify/polaris/locales/en.json";
 import { useSubmit, useActionData, useLoaderData } from "react-router";
@@ -11,6 +11,23 @@ export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
+  const shopDomain = session.shop;
+
+  // 1. ENSURE SHOP EXISTS IN OUR TRACKING TABLE
+  let shopData = await db.shop.findUnique({
+    where: { shop: shopDomain }
+  });
+
+  if (!shopData) {
+    shopData = await db.shop.create({
+      data: { shop: shopDomain, isActive: true }
+    });
+  }
+
+  // 2. CHECK IF SHOP IS ACTIVE
+  if (!shopData.isActive) {
+    return { isDeactivated: true, shopDomain };
+  }
   
   const timeoutLimit = new Date(Date.now() - 15 * 60 * 1000);
   
@@ -18,18 +35,18 @@ export const loader = async ({ request }) => {
     where: {
       status: "PROCESSING",
       createdAt: { lt: timeoutLimit },
-      shop: session.shop
+      shop: shopDomain
     },
     data: { status: "FAILED" }
   });
 
-  // 1. FETCH UPDATED JOBS
+  // 3. FETCH UPDATED JOBS
   const jobs = await db.uploadJob.findMany({
-    where: { shop: session.shop },
+    where: { shop: shopDomain },
     orderBy: { createdAt: "desc" },
   });
 
-  // 2. FETCH DASHBOARD STATS
+  // 4. FETCH DASHBOARD STATS
   const response = await admin.graphql(
     `#graphql
     query getProductStats {
@@ -55,7 +72,6 @@ export const loader = async ({ request }) => {
   const productCount = responseJson.data.productsCount.count;
   const products = responseJson.data.products.nodes;
   
-  // Calculate total images across fetched products
   let totalImagesCount = 0;
   const productList = [];
   
@@ -71,19 +87,18 @@ export const loader = async ({ request }) => {
       });
     } else {
       images.forEach((img, idx) => {
-        // Extract filename from URL
         const urlParts = img.url.split('/');
         const fileName = urlParts[urlParts.length - 1].split('?')[0];
         productList.push({
           id: `${product.id}-${idx}`,
-          title: idx === 0 ? product.title : "", // Only show title for the first image of a product
+          title: idx === 0 ? product.title : "", 
           imageName: fileName
         });
       });
     }
   });
 
-  return { jobs, productCount, totalImagesCount, productList };
+  return { jobs, productCount, totalImagesCount, productList, isDeactivated: false };
 };
 
 export const action = async ({ request }) => {
@@ -116,12 +131,17 @@ export const action = async ({ request }) => {
   const shopData = await shopQuery.json();
   const storeOwnerEmail = shopData.data.shop.email;
 
-  const newJob = await db.uploadJob.create({
-    data: { shop: shop },
-  });
-
   const rawPayload = formData.get("payload");
   const parsedPayload = JSON.parse(rawPayload);
+  const fileCount = parsedPayload.Files?.length || 0;
+
+  const newJob = await db.uploadJob.create({
+    data: { 
+      shop: shop,
+      imageCount: fileCount
+    },
+  });
+
   parsedPayload.shop = shop;
   parsedPayload.accessToken = accessToken;
   parsedPayload.email = storeOwnerEmail;
@@ -143,7 +163,7 @@ export const action = async ({ request }) => {
 };
 
 export default function Index() {
-  const { jobs, productCount, totalImagesCount, productList } = useLoaderData();
+  const { jobs, productCount, totalImagesCount, productList, isDeactivated, shopDomain } = useLoaderData();
   const [files, setFiles] = useState([]);
   const submit = useSubmit();
   const actionData = useActionData();
@@ -158,12 +178,13 @@ export default function Index() {
   }, []);
 
   const pagedProductList = useMemo(() => {
+    if (!productList) return [];
     const start = (currentPage - 1) * parseInt(itemsPerPage);
     const end = start + parseInt(itemsPerPage);
     return productList.slice(start, end);
   }, [productList, currentPage, itemsPerPage]);
 
-  const totalPages = Math.ceil(productList.length / parseInt(itemsPerPage));
+  const totalPages = Math.ceil((productList?.length || 0) / parseInt(itemsPerPage));
 
   const handleDropZoneDrop = useCallback(
     (_dropFiles, acceptedFiles, _rejectedFiles) =>
@@ -224,6 +245,21 @@ export default function Index() {
       submit({ actionType: "delete_job", jobId }, { method: "POST" });
     }
   };
+
+  if (isDeactivated) {
+    return (
+      <AppProvider i18n={enTranslations}>
+        <Page title="Maintenance">
+          <Banner title="App Deactivated" tone="warning">
+            <p>
+              Your access to the Batch Image Uploader has been temporarily restricted for {shopDomain}. 
+              Please contact the app administrator for more details.
+            </p>
+          </Banner>
+        </Page>
+      </AppProvider>
+    );
+  }
 
   return (
     <AppProvider i18n={enTranslations}>
@@ -360,7 +396,7 @@ export default function Index() {
                     { title: 'Job ID' },
                     { title: 'Started' },
                     { title: 'Finished' },
-                    { title: 'Duration' },
+                    { title: 'Images' },
                     { title: 'Status' },
                     { title: 'Actions' },
                   ]}
@@ -383,10 +419,7 @@ export default function Index() {
                           {job.completedAt ? new Date(job.completedAt).toLocaleTimeString() : "—"}
                         </IndexTable.Cell>
                         <IndexTable.Cell>
-                          {durationInSeconds !== null
-                            ? `${durationInSeconds}s`
-                            : <Text tone="subdued">Calculated on finish</Text>
-                          }
+                          {job.imageCount} images
                         </IndexTable.Cell>
                         <IndexTable.Cell>
                           <Badge tone={

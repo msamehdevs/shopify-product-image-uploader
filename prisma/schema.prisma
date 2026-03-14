@@ -38,6 +38,14 @@ model UploadJob {
   id          Int       @id @default(autoincrement())
   shop        String
   status      String    @default("Processing")
+  imageCount  Int       @default(0)
   createdAt   DateTime  @default(now())
   completedAt DateTime? // The '?' means it starts as empty (null)
+}
+
+model Shop {
+  id        Int      @id @default(autoincrement())
+  shop      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
 }
