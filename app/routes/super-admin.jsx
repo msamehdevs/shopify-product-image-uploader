@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { 
   AppProvider, 
   Page, 
@@ -12,10 +12,12 @@ import {
   TextField,
   FormLayout,
   InlineStack,
-  Box
+  Box,
+  Filters,
+  Link
 } from "@shopify/polaris";
 import enTranslations from "@shopify/polaris/locales/en.json";
-import { useLoaderData, useSubmit, useActionData } from "react-router";
+import { useLoaderData, useSubmit, useActionData, useNavigate, useSearchParams } from "react-router";
 import db from "../db.server";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 
@@ -23,20 +25,18 @@ export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }) => {
   const url = new URL(request.url);
-  const password = url.searchParams.get("pw");
+  const userParam = url.searchParams.get("user");
+  const pwParam = url.searchParams.get("pw");
+  
+  const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
   const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
 
-  if (password !== ADMIN_PASSWORD) {
+  if (userParam !== ADMIN_USERNAME || pwParam !== ADMIN_PASSWORD) {
     return { authorized: false };
   }
 
   const shops = await db.shop.findMany({
     orderBy: { createdAt: "desc" }
-  });
-
-  const uploadJobs = await db.uploadJob.findMany({
-    orderBy: { createdAt: "desc" },
-    take: 50
   });
 
   // Calculate stats for each shop
@@ -55,7 +55,7 @@ export const loader = async ({ request }) => {
     };
   }));
 
-  return { authorized: true, shopStats, latestJobs: uploadJobs };
+  return { authorized: true, shopStats };
 };
 
 export const action = async ({ request }) => {
@@ -77,9 +77,16 @@ export const action = async ({ request }) => {
 
 export default function SuperAdmin() {
   const loaderData = useLoaderData();
-  const actionData = useActionData();
   const submit = useSubmit();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  
+  const [userInput, setUserInput] = useState("");
   const [pwInput, setPwInput] = useState("");
+
+  // Search and Filter State
+  const [queryValue, setQueryValue] = useState("");
+  const [statusFilter, setStatusFilter] = useState(null);
 
   if (!loaderData.authorized) {
     return (
@@ -90,16 +97,23 @@ export default function SuperAdmin() {
               <Card>
                 <FormLayout>
                   <TextField
-                    label="Admin Password"
+                    label="Username"
+                    value={userInput}
+                    onChange={setUserInput}
+                    autoComplete="username"
+                  />
+                  <TextField
+                    label="Password"
                     type="password"
                     value={pwInput}
                     onChange={setPwInput}
-                    autoComplete="off"
+                    autoComplete="current-password"
                   />
                   <Button 
                     variant="primary" 
                     onClick={() => {
                       const url = new URL(window.location.href);
+                      url.searchParams.set("user", userInput);
                       url.searchParams.set("pw", pwInput);
                       window.location.href = url.toString();
                     }}
@@ -115,19 +129,36 @@ export default function SuperAdmin() {
     );
   }
 
-  const { shopStats, latestJobs } = loaderData;
+  const { shopStats } = loaderData;
+
+  const handleLogout = () => {
+    navigate("/super-admin");
+  };
+
+  const filteredShops = useMemo(() => {
+    return shopStats.filter(shop => {
+      const matchesQuery = shop.shop.toLowerCase().includes(queryValue.toLowerCase());
+      const matchesStatus = statusFilter === null || 
+        (statusFilter === 'active' && shop.isActive) || 
+        (statusFilter === 'deactivated' && !shop.isActive);
+      return matchesQuery && matchesStatus;
+    });
+  }, [shopStats, queryValue, statusFilter]);
 
   const handleToggleActive = (shopId) => {
-    const pw = new URL(window.location.href).searchParams.get("pw");
-    submit({ actionType: "toggle_active", shopId, pw }, { method: "POST" });
+    const user = searchParams.get("user");
+    const pw = searchParams.get("pw");
+    submit({ actionType: "toggle_active", shopId, user, pw }, { method: "POST" });
   };
 
   return (
     <AppProvider i18n={enTranslations}>
-      <Page title="Super Admin Dashboard" backAction={{ content: 'Back', url: '/' }}>
+      <Page 
+        title="Super Admin Dashboard" 
+        primaryAction={{ content: 'Logout', onAction: handleLogout, destructive: true }}
+      >
         <BlockStack gap="500">
           <Layout>
-            {/* Global Stats Summary */}
             <Layout.Section>
               <Card>
                 <BlockStack gap="400">
@@ -148,27 +179,57 @@ export default function SuperAdmin() {
               </Card>
             </Layout.Section>
 
-            {/* Shop Management Table */}
             <Layout.Section>
               <Card padding="0">
                 <Box padding="400">
-                   <Text as="h2" variant="headingMd">Shop Management & Consumption</Text>
+                  <BlockStack gap="400">
+                    <Text as="h2" variant="headingMd">Shop Management</Text>
+                    <Filters
+                      queryValue={queryValue}
+                      filters={[
+                        {
+                          key: 'status',
+                          label: 'Status',
+                          filter: (
+                            <Select
+                              label="Status"
+                              labelHidden
+                              options={[
+                                {label: 'All', value: 'all'},
+                                {label: 'Active', value: 'active'},
+                                {label: 'Deactivated', value: 'deactivated'},
+                              ]}
+                              onChange={(val) => setStatusFilter(val === 'all' ? null : val)}
+                              value={statusFilter || 'all'}
+                            />
+                          ),
+                          shortcut: true,
+                        },
+                      ]}
+                      onQueryChange={setQueryValue}
+                      onQueryClear={() => setQueryValue("")}
+                      onClearAll={() => {
+                        setQueryValue("");
+                        setStatusFilter(null);
+                      }}
+                    />
+                  </BlockStack>
                 </Box>
                 <IndexTable
                   resourceName={{ singular: 'shop', plural: 'shops' }}
-                  itemCount={shopStats.length}
+                  itemCount={filteredShops.length}
                   headings={[
                     { title: 'Shop Domain' },
                     { title: 'Status' },
                     { title: 'Total Jobs' },
                     { title: 'Total Images' },
-                    { title: 'Failed' },
                     { title: 'Action' },
+                    { title: '' },
                   ]}
                   selectable={false}
                 >
-                  {shopStats.map((shop) => (
-                    <IndexTable.Row key={shop.id} id={shop.id} position={shop.id}>
+                  {filteredShops.map((shop) => (
+                    <IndexTable.Row key={shop.id} id={shop.id.toString()} position={shop.id}>
                       <IndexTable.Cell>
                         <Text variant="bodyMd" fontWeight="bold" as="span">{shop.shop}</Text>
                       </IndexTable.Cell>
@@ -180,11 +241,6 @@ export default function SuperAdmin() {
                       <IndexTable.Cell>{shop.totalJobs}</IndexTable.Cell>
                       <IndexTable.Cell>{shop.totalImages}</IndexTable.Cell>
                       <IndexTable.Cell>
-                        <Text tone={shop.failedJobs > 0 ? "critical" : "subdued"}>
-                          {shop.failedJobs}
-                        </Text>
-                      </IndexTable.Cell>
-                      <IndexTable.Cell>
                         <Button 
                           size="slim"
                           variant="secondary"
@@ -194,45 +250,12 @@ export default function SuperAdmin() {
                           {shop.isActive ? "Deactivate" : "Activate"}
                         </Button>
                       </IndexTable.Cell>
-                    </IndexTable.Row>
-                  ))}
-                </IndexTable>
-              </Card>
-            </Layout.Section>
-
-            {/* Global Logs / Recent Activity */}
-            <Layout.Section>
-              <Card padding="0">
-                <Box padding="400">
-                  <Text as="h2" variant="headingMd">Global Execution Logs (Last 50)</Text>
-                </Box>
-                <IndexTable
-                  resourceName={{ singular: 'job', plural: 'jobs' }}
-                  itemCount={latestJobs.length}
-                  headings={[
-                    { title: 'Job ID' },
-                    { title: 'Shop' },
-                    { title: 'Images' },
-                    { title: 'Status' },
-                    { title: 'Time' },
-                  ]}
-                  selectable={false}
-                >
-                  {latestJobs.map((job) => (
-                    <IndexTable.Row key={job.id} id={job.id} position={job.id}>
-                      <IndexTable.Cell>#{job.id}</IndexTable.Cell>
-                      <IndexTable.Cell>{job.shop}</IndexTable.Cell>
-                      <IndexTable.Cell>{job.imageCount}</IndexTable.Cell>
                       <IndexTable.Cell>
-                        <Badge tone={
-                          job.status === "COMPLETED" ? "success" : 
-                          job.status === "FAILED" ? "critical" : "attention"
-                        }>
-                          {job.status}
-                        </Badge>
-                      </IndexTable.Cell>
-                      <IndexTable.Cell>
-                        {new Date(job.createdAt).toLocaleString()}
+                        <Link 
+                           url={`/super-admin/shop/${shop.id}?user=${searchParams.get("user")}&pw=${searchParams.get("pw")}`}
+                        >
+                          View Details
+                        </Link>
                       </IndexTable.Cell>
                     </IndexTable.Row>
                   ))}
