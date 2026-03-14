@@ -219,7 +219,11 @@ export default function Index() {
                             }
                           </IndexTable.Cell>
                           <IndexTable.Cell>
-                            <Badge tone={job.status === "COMPLETED" ? "success" : job.status === "FAILED" ? "critical" : "info"}>
+                            <Badge tone={
+                              job.status === "COMPLETED" ? "success" : 
+                              job.status === "FAILED" ? "critical" : 
+                              job.status === "PROCESSING" ? "attention" : "info"
+                            }>
                               {job.status}
                             </Badge>
                           </IndexTable.Cell>
