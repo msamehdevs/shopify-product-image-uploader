@@ -57,19 +57,30 @@ export const loader = async ({ request }) => {
   
   // Calculate total images across fetched products
   let totalImagesCount = 0;
-  const productList = products.map(product => {
-    const images = product.images.nodes.map(img => {
-      // Extract filename from URL
-      const urlParts = img.url.split('/');
-      const fileName = urlParts[urlParts.length - 1].split('?')[0];
-      return fileName;
-    });
+  const productList = [];
+  
+  products.forEach(product => {
+    const images = product.images.nodes;
     totalImagesCount += images.length;
-    return {
-      id: product.id,
-      title: product.title,
-      imageNames: images.join(", ")
-    };
+    
+    if (images.length === 0) {
+      productList.push({
+        id: `${product.id}-no-img`,
+        title: product.title,
+        imageName: "No images"
+      });
+    } else {
+      images.forEach((img, idx) => {
+        // Extract filename from URL
+        const urlParts = img.url.split('/');
+        const fileName = urlParts[urlParts.length - 1].split('?')[0];
+        productList.push({
+          id: `${product.id}-${idx}`,
+          title: idx === 0 ? product.title : "", // Only show title for the first image of a product
+          imageName: fileName
+        });
+      });
+    }
   });
 
   return { jobs, productCount, totalImagesCount, productList };
@@ -166,8 +177,8 @@ export default function Index() {
   };
 
   const handleExportCSV = () => {
-    const headers = ["Product Title", "Image Filenames"];
-    const rows = productList.map(p => [`"${p.title.replace(/"/g, '""')}"`, `"${p.imageNames.replace(/"/g, '""')}"`]);
+    const headers = ["Product Title", "Image Filename"];
+    const rows = productList.map(p => [`"${p.title.replace(/"/g, '""')}"`, `"${p.imageName.replace(/"/g, '""')}"`]);
     
     const csvContent = [
       headers.join(","),
@@ -269,7 +280,7 @@ export default function Index() {
                   itemCount={productList.length}
                   headings={[
                     { title: 'Product Title' },
-                    { title: 'Image Filenames' },
+                    { title: 'Image Filename' },
                   ]}
                   selectable={false}
                 >
@@ -280,7 +291,7 @@ export default function Index() {
                       </IndexTable.Cell>
                       <IndexTable.Cell>
                         <Text variant="bodyMd" as="span" tone="subdued">
-                          {product.imageNames || "No images"}
+                          {product.imageName}
                         </Text>
                       </IndexTable.Cell>
                     </IndexTable.Row>
