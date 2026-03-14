@@ -133,7 +133,7 @@ export default function SuperAdmin() {
   const { shopStats } = loaderData;
 
   const handleLogout = () => {
-    navigate("/super-admin");
+    window.location.href = "/super-admin";
   };
 
   const filteredShops = useMemo(() => {
