@@ -1,5 +1,5 @@
-import { useState, useCallback } from "react";
-import { AppProvider, Page, Layout, Card, DropZone, BlockStack, Text, Button, IndexTable, Badge } from "@shopify/polaris";
+import { useState, useCallback, useMemo } from "react";
+import { AppProvider, Page, Layout, Card, DropZone, BlockStack, Text, Button, IndexTable, Badge, Pagination, Select, InlineStack } from "@shopify/polaris";
 import { DeleteIcon } from "@shopify/polaris-icons";
 import enTranslations from "@shopify/polaris/locales/en.json";
 import { useSubmit, useActionData, useLoaderData } from "react-router";
@@ -148,6 +148,23 @@ export default function Index() {
   const submit = useSubmit();
   const actionData = useActionData();
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState('5');
+
+  const handleItemsPerPageChange = useCallback((value) => {
+    setItemsPerPage(value);
+    setCurrentPage(1);
+  }, []);
+
+  const pagedProductList = useMemo(() => {
+    const start = (currentPage - 1) * parseInt(itemsPerPage);
+    const end = start + parseInt(itemsPerPage);
+    return productList.slice(start, end);
+  }, [productList, currentPage, itemsPerPage]);
+
+  const totalPages = Math.ceil(productList.length / parseInt(itemsPerPage));
+
   const handleDropZoneDrop = useCallback(
     (_dropFiles, acceptedFiles, _rejectedFiles) =>
       setFiles((files) => [...files, ...acceptedFiles]),
@@ -277,14 +294,14 @@ export default function Index() {
                 </div>
                 <IndexTable
                   resourceName={{ singular: 'product', plural: 'products' }}
-                  itemCount={productList.length}
+                  itemCount={pagedProductList.length}
                   headings={[
                     { title: 'Product Title' },
                     { title: 'Image Filename' },
                   ]}
                   selectable={false}
                 >
-                  {productList.map((product, index) => (
+                  {pagedProductList.map((product, index) => (
                     <IndexTable.Row key={product.id} id={product.id} position={index}>
                       <IndexTable.Cell>
                         <Text variant="bodyMd" fontWeight="bold" as="span">{product.title}</Text>
@@ -297,6 +314,29 @@ export default function Index() {
                     </IndexTable.Row>
                   ))}
                 </IndexTable>
+                <div style={{ padding: '16px', borderTop: '1px solid #e1e3e5' }}>
+                  <InlineStack align="space-between">
+                    <div style={{ width: '150px' }}>
+                      <Select
+                        label="Items per page"
+                        labelHidden
+                        options={[
+                          {label: '5 items', value: '5'},
+                          {label: '10 items', value: '10'},
+                          {label: '25 items', value: '25'},
+                        ]}
+                        onChange={handleItemsPerPageChange}
+                        value={itemsPerPage}
+                      />
+                    </div>
+                    <Pagination
+                      hasPrevious={currentPage > 1}
+                      onPrevious={() => setCurrentPage((page) => page - 1)}
+                      hasNext={currentPage < totalPages}
+                      onNext={() => setCurrentPage((page) => page + 1)}
+                    />
+                  </InlineStack>
+                </div>
               </Card>
             </Layout.Section>
 
