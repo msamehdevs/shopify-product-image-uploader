@@ -19,21 +19,17 @@ import {
 } from "@shopify/polaris";
 import { SearchIcon } from "@shopify/polaris-icons";
 import enTranslations from "@shopify/polaris/locales/en.json";
-import { useLoaderData, useSubmit, useActionData, useNavigate, useSearchParams } from "react-router";
+import { useLoaderData, useSubmit, useActionData, useNavigate, redirect } from "react-router";
 import db from "../db.server";
+import { getSession, commitSession, destroySession } from "../sessions.server";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }) => {
-  const url = new URL(request.url);
-  const userParam = url.searchParams.get("user");
-  const pwParam = url.searchParams.get("pw");
+  const session = await getSession(request.headers.get("Cookie"));
   
-  const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
-  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
-
-  if (userParam !== ADMIN_USERNAME || pwParam !== ADMIN_PASSWORD) {
+  if (!session.has("adminAuthenticated")) {
     return { authorized: false };
   }
 
@@ -59,9 +55,33 @@ export const loader = async ({ request }) => {
 export const action = async ({ request }) => {
   const formData = await request.formData();
   const actionType = formData.get("actionType");
-  const shopId = formData.get("shopId");
+
+  if (actionType === "login") {
+    const username = formData.get("username");
+    const password = formData.get("password");
+    
+    const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
+    const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
+
+    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+      const session = await getSession(request.headers.get("Cookie"));
+      session.set("adminAuthenticated", true);
+      return redirect("/super-admin", {
+        headers: { "Set-Cookie": await commitSession(session) },
+      });
+    }
+    return { error: "Invalid credentials" };
+  }
+
+  if (actionType === "logout") {
+    const session = await getSession(request.headers.get("Cookie"));
+    return redirect("/super-admin", {
+      headers: { "Set-Cookie": await destroySession(session) },
+    });
+  }
 
   if (actionType === "toggle_active") {
+    const shopId = formData.get("shopId");
     const shop = await db.shop.findUnique({ where: { id: parseInt(shopId) } });
     await db.shop.update({
       where: { id: parseInt(shopId) },
@@ -75,9 +95,8 @@ export const action = async ({ request }) => {
 
 export default function SuperAdmin() {
   const loaderData = useLoaderData();
+  const actionData = useActionData();
   const submit = useSubmit();
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   
   const [userInput, setUserInput] = useState("");
   const [pwInput, setPwInput] = useState("");
@@ -108,13 +127,13 @@ export default function SuperAdmin() {
                     onChange={setPwInput}
                     autoComplete="current-password"
                   />
+                  {actionData?.error && (
+                    <Text tone="critical">{actionData.error}</Text>
+                  )}
                   <Button 
                     variant="primary" 
                     onClick={() => {
-                      const url = new URL(window.location.href);
-                      url.searchParams.set("user", userInput);
-                      url.searchParams.set("pw", pwInput);
-                      window.location.href = url.toString();
+                      submit({ actionType: "login", username: userInput, password: pwInput }, { method: "POST" });
                     }}
                   >
                     Login
@@ -131,7 +150,7 @@ export default function SuperAdmin() {
   const { shopStats } = loaderData;
 
   const handleLogout = () => {
-    window.location.href = "/super-admin";
+    submit({ actionType: "logout" }, { method: "POST" });
   };
 
   const filteredShops = useMemo(() => {
@@ -145,9 +164,7 @@ export default function SuperAdmin() {
   }, [shopStats, appliedSearch, statusFilter]);
 
   const handleToggleActive = (shopId) => {
-    const user = searchParams.get("user");
-    const pw = searchParams.get("pw");
-    submit({ actionType: "toggle_active", shopId, user, pw }, { method: "POST" });
+    submit({ actionType: "toggle_active", shopId }, { method: "POST" });
   };
 
   const handleSearch = () => {
@@ -238,9 +255,7 @@ export default function SuperAdmin() {
                         </Button>
                       </IndexTable.Cell>
                       <IndexTable.Cell>
-                        <Link 
-                           url={`/super-admin/shop/${shop.id}?user=${searchParams.get("user")}&pw=${searchParams.get("pw")}`}
-                        >
+                        <Link url={`/super-admin/shop/${shop.id}`}>
                           Logs & More
                         </Link>
                       </IndexTable.Cell>

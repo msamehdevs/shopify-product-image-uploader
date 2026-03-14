@@ -12,22 +12,18 @@ import {
   Box
 } from "@shopify/polaris";
 import enTranslations from "@shopify/polaris/locales/en.json";
-import { useLoaderData, useSubmit, useSearchParams } from "react-router";
-import db from "../db.server";
-import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
+import { useLoaderData, useSubmit, redirect } from "react-router";
+import db from "../../db.server";
+import { getSession } from "../../sessions.server";
+import polarisStyles from "../../build/esm/styles.css?url";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request, params }) => {
-  const url = new URL(request.url);
-  const userParam = url.searchParams.get("user");
-  const pwParam = url.searchParams.get("pw");
+  const session = await getSession(request.headers.get("Cookie"));
   
-  const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
-  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
-
-  if (userParam !== ADMIN_USERNAME || pwParam !== ADMIN_PASSWORD) {
-    throw new Response("Unauthorized", { status: 401 });
+  if (!session.has("adminAuthenticated")) {
+    return redirect("/super-admin");
   }
 
   const shop = await db.shop.findUnique({
@@ -49,6 +45,11 @@ export const loader = async ({ request, params }) => {
 };
 
 export const action = async ({ request, params }) => {
+  const session = await getSession(request.headers.get("Cookie"));
+  if (!session.has("adminAuthenticated")) {
+    return redirect("/super-admin");
+  }
+
   const formData = await request.formData();
   const actionType = formData.get("actionType");
 
@@ -66,15 +67,12 @@ export const action = async ({ request, params }) => {
 export default function ShopDetails() {
   const { shop, jobs, totalImages } = useLoaderData();
   const submit = useSubmit();
-  const [searchParams] = useSearchParams();
 
   const handleToggleActive = () => {
-    const user = searchParams.get("user");
-    const pw = searchParams.get("pw");
-    submit({ actionType: "toggle_active", user, pw }, { method: "POST" });
+    submit({ actionType: "toggle_active" }, { method: "POST" });
   };
 
-  const backUrl = `/super-admin?user=${searchParams.get("user")}&pw=${searchParams.get("pw")}`;
+  const backUrl = "/super-admin";
 
   return (
     <AppProvider i18n={enTranslations}>
