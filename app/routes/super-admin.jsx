@@ -13,10 +13,11 @@ import {
   FormLayout,
   InlineStack,
   Box,
-  Filters,
+  Select,
   Link,
-  Select
+  Icon
 } from "@shopify/polaris";
+import { SearchIcon } from "@shopify/polaris-icons";
 import enTranslations from "@shopify/polaris/locales/en.json";
 import { useLoaderData, useSubmit, useActionData, useNavigate, useSearchParams } from "react-router";
 import db from "../db.server";
@@ -40,19 +41,15 @@ export const loader = async ({ request }) => {
     orderBy: { createdAt: "desc" }
   });
 
-  // Calculate stats for each shop
   const shopStats = await Promise.all(shops.map(async (shop) => {
     const jobs = await db.uploadJob.findMany({
       where: { shop: shop.shop }
     });
     const totalImages = jobs.reduce((sum, job) => sum + job.imageCount, 0);
-    const failedJobs = jobs.filter(j => j.status === "FAILED").length;
-    
     return {
       ...shop,
       totalJobs: jobs.length,
-      totalImages,
-      failedJobs
+      totalImages
     };
   }));
 
@@ -86,8 +83,9 @@ export default function SuperAdmin() {
   const [pwInput, setPwInput] = useState("");
 
   // Search and Filter State
-  const [queryValue, setQueryValue] = useState("");
-  const [statusFilter, setStatusFilter] = useState(null);
+  const [searchValue, setSearchValue] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
 
   if (!loaderData.authorized) {
     return (
@@ -138,18 +136,22 @@ export default function SuperAdmin() {
 
   const filteredShops = useMemo(() => {
     return shopStats.filter(shop => {
-      const matchesQuery = shop.shop.toLowerCase().includes(queryValue.toLowerCase());
-      const matchesStatus = statusFilter === null || 
-        (statusFilter === 'active' && shop.isActive) || 
-        (statusFilter === 'deactivated' && !shop.isActive);
-      return matchesQuery && matchesStatus;
+      const matchesSearch = shop.shop.toLowerCase().includes(appliedSearch.toLowerCase());
+      const matchesStatus = statusFilter === "all" || 
+        (statusFilter === "active" && shop.isActive) || 
+        (statusFilter === "deactivated" && !shop.isActive);
+      return matchesSearch && matchesStatus;
     });
-  }, [shopStats, queryValue, statusFilter]);
+  }, [shopStats, appliedSearch, statusFilter]);
 
   const handleToggleActive = (shopId) => {
     const user = searchParams.get("user");
     const pw = searchParams.get("pw");
     submit({ actionType: "toggle_active", shopId, user, pw }, { method: "POST" });
+  };
+
+  const handleSearch = () => {
+    setAppliedSearch(searchValue);
   };
 
   return (
@@ -163,18 +165,36 @@ export default function SuperAdmin() {
             <Layout.Section>
               <Card>
                 <BlockStack gap="400">
-                  <Text as="h2" variant="headingMd">Platform Overview</Text>
-                  <InlineStack gap="1000">
-                    <BlockStack>
-                      <Text variant="headingSm" as="h6">Total Shops</Text>
-                      <Text variant="headingLg" as="p">{shopStats.length}</Text>
-                    </BlockStack>
-                    <BlockStack>
-                      <Text variant="headingSm" as="h6">Global Uploads</Text>
-                      <Text variant="headingLg" as="p">
-                        {shopStats.reduce((sum, s) => sum + s.totalImages, 0)} images
-                      </Text>
-                    </BlockStack>
+                  <InlineStack align="space-between">
+                     <Text as="h2" variant="headingMd">Shop Search & Filters</Text>
+                     <Button variant="plain" onClick={() => { setSearchValue(""); setAppliedSearch(""); setStatusFilter("all"); }}>Clear Filters</Button>
+                  </InlineStack>
+                  <InlineStack gap="300" align="start">
+                    <div style={{ flexGrow: 1 }}>
+                      <TextField
+                        label="Search by Shop Domain"
+                        labelHidden
+                        placeholder="example.myshopify.com"
+                        value={searchValue}
+                        onChange={setSearchValue}
+                        prefix={<Icon source={SearchIcon} />}
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div style={{ width: '200px' }}>
+                      <Select
+                        label="Status"
+                        labelHidden
+                        options={[
+                          {label: 'All Statuses', value: 'all'},
+                          {label: 'Active Only', value: 'active'},
+                          {label: 'Deactivated Only', value: 'deactivated'},
+                        ]}
+                        onChange={setStatusFilter}
+                        value={statusFilter}
+                      />
+                    </div>
+                    <Button variant="primary" onClick={handleSearch}>Search</Button>
                   </InlineStack>
                 </BlockStack>
               </Card>
@@ -182,50 +202,16 @@ export default function SuperAdmin() {
 
             <Layout.Section>
               <Card padding="0">
-                <Box padding="400">
-                  <BlockStack gap="400">
-                    <Text as="h2" variant="headingMd">Shop Management</Text>
-                    <Filters
-                      queryValue={queryValue}
-                      filters={[
-                        {
-                          key: 'status',
-                          label: 'Status',
-                          filter: (
-                            <Select
-                              label="Status"
-                              labelHidden
-                              options={[
-                                {label: 'All', value: 'all'},
-                                {label: 'Active', value: 'active'},
-                                {label: 'Deactivated', value: 'deactivated'},
-                              ]}
-                              onChange={(val) => setStatusFilter(val === 'all' ? null : val)}
-                              value={statusFilter || 'all'}
-                            />
-                          ),
-                          shortcut: true,
-                        },
-                      ]}
-                      onQueryChange={setQueryValue}
-                      onQueryClear={() => setQueryValue("")}
-                      onClearAll={() => {
-                        setQueryValue("");
-                        setStatusFilter(null);
-                      }}
-                    />
-                  </BlockStack>
-                </Box>
                 <IndexTable
                   resourceName={{ singular: 'shop', plural: 'shops' }}
                   itemCount={filteredShops.length}
                   headings={[
                     { title: 'Shop Domain' },
-                    { title: 'Status' },
-                    { title: 'Total Jobs' },
-                    { title: 'Total Images' },
-                    { title: 'Action' },
-                    { title: '' },
+                    { title: 'Usage Status' },
+                    { title: 'Jobs' },
+                    { title: 'Images' },
+                    { title: 'Control Access' },
+                    { title: 'Details' },
                   ]}
                   selectable={false}
                 >
@@ -236,7 +222,7 @@ export default function SuperAdmin() {
                       </IndexTable.Cell>
                       <IndexTable.Cell>
                         <Badge tone={shop.isActive ? "success" : "critical"}>
-                          {shop.isActive ? "Active" : "Deactivated"}
+                          {shop.isActive ? "Enabled" : "Disabled"}
                         </Badge>
                       </IndexTable.Cell>
                       <IndexTable.Cell>{shop.totalJobs}</IndexTable.Cell>
@@ -244,23 +230,30 @@ export default function SuperAdmin() {
                       <IndexTable.Cell>
                         <Button 
                           size="slim"
-                          variant="secondary"
+                          variant="primary"
                           tone={shop.isActive ? "critical" : "success"}
                           onClick={() => handleToggleActive(shop.id)}
                         >
-                          {shop.isActive ? "Deactivate" : "Activate"}
+                          {shop.isActive ? "Deactivate App" : "Activate App"}
                         </Button>
                       </IndexTable.Cell>
                       <IndexTable.Cell>
                         <Link 
                            url={`/super-admin/shop/${shop.id}?user=${searchParams.get("user")}&pw=${searchParams.get("pw")}`}
                         >
-                          View Details
+                          Logs & More
                         </Link>
                       </IndexTable.Cell>
                     </IndexTable.Row>
                   ))}
                 </IndexTable>
+                {filteredShops.length === 0 && (
+                  <Box padding="1000">
+                    <BlockStack align="center" inlineAlign="center">
+                       <Text tone="subdued">No shops found matching your criteria.</Text>
+                    </BlockStack>
+                  </Box>
+                )}
               </Card>
             </Layout.Section>
           </Layout>
