@@ -25,7 +25,7 @@ export const action = async ({ request }) => {
     const updatedJob = await prisma.uploadJob.update({
       where: { id: parseInt(jobId) },
       data: { 
-        status: "Complete",
+        status: (payload.status || "COMPLETED").toUpperCase(),
         completedAt: new Date() // Sets the 'now' timestamp
       },
     });
