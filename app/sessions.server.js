@@ -1,4 +1,4 @@
-import { createCookieSessionStorage } from "@react-router/node";
+import { createCookieSessionStorage } from "react-router";
 
 const sessionStorage = createCookieSessionStorage({
   cookie: {
