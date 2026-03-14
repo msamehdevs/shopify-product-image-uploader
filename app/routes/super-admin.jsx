@@ -14,7 +14,8 @@ import {
   InlineStack,
   Box,
   Filters,
-  Link
+  Link,
+  Select
 } from "@shopify/polaris";
 import enTranslations from "@shopify/polaris/locales/en.json";
 import { useLoaderData, useSubmit, useActionData, useNavigate, useSearchParams } from "react-router";
