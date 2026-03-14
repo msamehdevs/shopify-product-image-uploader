@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { AppProvider, Page, Layout, Card, DropZone, BlockStack, Text, Button, IndexTable, Badge } from "@shopify/polaris";
+import { DeleteIcon } from "@shopify/polaris-icons";
 import enTranslations from "@shopify/polaris/locales/en.json";
 import { useSubmit, useActionData, useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
@@ -35,6 +36,25 @@ export const action = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
   const { shop, accessToken } = session;
 
+  const formData = await request.formData();
+  const actionType = formData.get("actionType") || "upload";
+
+  if (actionType === "delete_all_jobs") {
+    await db.uploadJob.deleteMany({
+      where: { shop: session.shop },
+    });
+    return { success: true, message: "All jobs deleted" };
+  }
+
+  if (actionType === "delete_job") {
+    const jobId = formData.get("jobId");
+    await db.uploadJob.delete({
+      where: { id: parseInt(jobId), shop: session.shop },
+    });
+    return { success: true, message: `Job #${jobId} deleted` };
+  }
+
+  // Default: Upload action
   const shopQuery = await admin.graphql(`
     #graphql
     query { shop { email } }
@@ -42,14 +62,11 @@ export const action = async ({ request }) => {
   const shopData = await shopQuery.json();
   const storeOwnerEmail = shopData.data.shop.email;
 
-  // Using 'db' here too for consistency
   const newJob = await db.uploadJob.create({
     data: { shop: shop },
   });
 
-  const formData = await request.formData();
   const rawPayload = formData.get("payload");
-
   const parsedPayload = JSON.parse(rawPayload);
   parsedPayload.shop = shop;
   parsedPayload.accessToken = accessToken;
@@ -101,8 +118,20 @@ export default function Index() {
     const base64Files = await Promise.all(filePromises);
     const payload = JSON.stringify({ Files: base64Files });
 
-    submit({ payload }, { method: "POST" });
+    submit({ payload, actionType: "upload" }, { method: "POST" });
     setFiles([]);
+  };
+
+  const handleDeleteAll = () => {
+    if (confirm("Are you sure you want to delete all job history?")) {
+      submit({ actionType: "delete_all_jobs" }, { method: "POST" });
+    }
+  };
+
+  const handleDeleteJob = (jobId) => {
+    if (confirm(`Are you sure you want to delete job #${jobId}?`)) {
+      submit({ actionType: "delete_job", jobId }, { method: "POST" });
+    }
   };
 
   return (
@@ -129,13 +158,31 @@ export default function Index() {
                   >
                     Upload Images
                   </Button>
-                  {actionData?.success && (
-                    <Text tone="success">Images successfully sent for processing!</Text>
+                  {actionData?.success && actionData?.message && (
+                    <div style={{ marginTop: '8px' }}>
+                      <Text tone="success">{actionData.message}</Text>
+                    </div>
+                  )}
+                  {actionData?.success && !actionData?.message && (
+                    <div style={{ marginTop: '8px' }}>
+                      <Text tone="success">Images successfully sent for processing!</Text>
+                    </div>
                   )}
                 </BlockStack>
               </Card>
               <Layout.Section>
                 <Card padding="0">
+                  <div style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text variant="headingMd" as="h2">Execution History</Text>
+                    <Button 
+                      tone="critical" 
+                      variant="tertiary" 
+                      onClick={handleDeleteAll}
+                      disabled={jobs.length === 0}
+                    >
+                      Delete All History
+                    </Button>
+                  </div>
                   <IndexTable
                     resourceName={{ singular: 'upload job', plural: 'upload jobs' }}
                     itemCount={jobs.length}
@@ -145,6 +192,7 @@ export default function Index() {
                       { title: 'Finished' },
                       { title: 'Duration' },
                       { title: 'Status' },
+                      { title: 'Actions' },
                     ]}
                     selectable={false}
                   >
@@ -174,6 +222,15 @@ export default function Index() {
                             <Badge tone={job.status === "COMPLETED" ? "success" : job.status === "FAILED" ? "critical" : "info"}>
                               {job.status}
                             </Badge>
+                          </IndexTable.Cell>
+                          <IndexTable.Cell>
+                            <Button
+                              icon={DeleteIcon}
+                              tone="critical"
+                              variant="tertiary"
+                              onClick={() => handleDeleteJob(job.id)}
+                              accessibilityLabel={`Delete job ${job.id}`}
+                            />
                           </IndexTable.Cell>
                         </IndexTable.Row>
                       );
