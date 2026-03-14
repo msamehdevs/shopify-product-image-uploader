@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { 
   AppProvider, 
   Page, 
@@ -19,7 +19,7 @@ import {
 } from "@shopify/polaris";
 import { SearchIcon } from "@shopify/polaris-icons";
 import enTranslations from "@shopify/polaris/locales/en.json";
-import { useLoaderData, useSubmit, useActionData, useNavigate, redirect } from "react-router";
+import { useLoaderData, useSubmit, useActionData, redirect } from "react-router";
 import db from "../db.server";
 import { getSession, commitSession, destroySession } from "../sessions.server";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
@@ -30,7 +30,7 @@ export const loader = async ({ request }) => {
   const session = await getSession(request.headers.get("Cookie"));
   
   if (!session.has("adminAuthenticated")) {
-    return { authorized: false };
+    return { authorized: false, shopStats: [] };
   }
 
   const shops = await db.shop.findMany({
@@ -66,14 +66,12 @@ export const action = async ({ request }) => {
     if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
       const session = await getSession(request.headers.get("Cookie"));
       session.set("adminAuthenticated", "true");
-      console.log("Login successful, committing session...");
       return redirect("/super-admin", {
         headers: { 
           "Set-Cookie": await commitSession(session) 
         },
       });
     }
-    console.log("Login failed: Invalid credentials");
     return { error: "Invalid username or password" };
   }
 
@@ -110,7 +108,31 @@ export default function SuperAdmin() {
   const [appliedSearch, setAppliedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  if (!loaderData.authorized) {
+  const { authorized, shopStats = [] } = loaderData;
+
+  const filteredShops = useMemo(() => {
+    return shopStats.filter(shop => {
+      const matchesSearch = shop.shop.toLowerCase().includes(appliedSearch.toLowerCase());
+      const matchesStatus = statusFilter === "all" || 
+        (statusFilter === "active" && shop.isActive) || 
+        (statusFilter === "deactivated" && !shop.isActive);
+      return matchesSearch && matchesStatus;
+    });
+  }, [shopStats, appliedSearch, statusFilter]);
+
+  const handleLogout = useCallback(() => {
+    submit({ actionType: "logout" }, { method: "POST" });
+  }, [submit]);
+
+  const handleToggleActive = useCallback((shopId) => {
+    submit({ actionType: "toggle_active", shopId }, { method: "POST" });
+  }, [submit]);
+
+  const handleSearch = useCallback(() => {
+    setAppliedSearch(searchValue);
+  }, [searchValue]);
+
+  if (!authorized) {
     return (
       <AppProvider i18n={enTranslations}>
         <Page title="Super Admin Login">
@@ -150,30 +172,6 @@ export default function SuperAdmin() {
       </AppProvider>
     );
   }
-
-  const { shopStats } = loaderData;
-
-  const handleLogout = () => {
-    submit({ actionType: "logout" }, { method: "POST" });
-  };
-
-  const filteredShops = useMemo(() => {
-    return shopStats.filter(shop => {
-      const matchesSearch = shop.shop.toLowerCase().includes(appliedSearch.toLowerCase());
-      const matchesStatus = statusFilter === "all" || 
-        (statusFilter === "active" && shop.isActive) || 
-        (statusFilter === "deactivated" && !shop.isActive);
-      return matchesSearch && matchesStatus;
-    });
-  }, [shopStats, appliedSearch, statusFilter]);
-
-  const handleToggleActive = (shopId) => {
-    submit({ actionType: "toggle_active", shopId }, { method: "POST" });
-  };
-
-  const handleSearch = () => {
-    setAppliedSearch(searchValue);
-  };
 
   return (
     <AppProvider i18n={enTranslations}>
