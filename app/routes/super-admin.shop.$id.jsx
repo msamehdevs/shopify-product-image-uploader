@@ -13,8 +13,8 @@ import {
 } from "@shopify/polaris";
 import enTranslations from "@shopify/polaris/locales/en.json";
 import { useLoaderData, useSubmit, redirect } from "react-router";
-import db from "../../db.server";
-import { getSession } from "../../sessions.server";
+import db from "../db.server";
+import { getSession } from "../sessions.server";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
