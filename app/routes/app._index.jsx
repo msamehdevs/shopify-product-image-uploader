@@ -23,13 +23,56 @@ export const loader = async ({ request }) => {
     data: { status: "FAILED" }
   });
 
-  // 2. FETCH UPDATED JOBS
+  // 1. FETCH UPDATED JOBS
   const jobs = await db.uploadJob.findMany({
     where: { shop: session.shop },
     orderBy: { createdAt: "desc" },
   });
 
-  return { jobs };
+  // 2. FETCH DASHBOARD STATS
+  const response = await admin.graphql(
+    `#graphql
+    query getProductStats {
+      productsCount {
+        count
+      }
+      products(first: 50) {
+        nodes {
+          id
+          title
+          images(first: 20) {
+            nodes {
+              url
+              altText
+            }
+          }
+        }
+      }
+    }`
+  );
+  
+  const responseJson = await response.json();
+  const productCount = responseJson.data.productsCount.count;
+  const products = responseJson.data.products.nodes;
+  
+  // Calculate total images across fetched products
+  let totalImagesCount = 0;
+  const productList = products.map(product => {
+    const images = product.images.nodes.map(img => {
+      // Extract filename from URL
+      const urlParts = img.url.split('/');
+      const fileName = urlParts[urlParts.length - 1].split('?')[0];
+      return fileName;
+    });
+    totalImagesCount += images.length;
+    return {
+      id: product.id,
+      title: product.title,
+      imageNames: images.join(", ")
+    };
+  });
+
+  return { jobs, productCount, totalImagesCount, productList };
 };
 
 export const action = async ({ request }) => {
@@ -89,7 +132,7 @@ export const action = async ({ request }) => {
 };
 
 export default function Index() {
-  const { jobs } = useLoaderData();
+  const { jobs, productCount, totalImagesCount, productList } = useLoaderData();
   const [files, setFiles] = useState([]);
   const submit = useSubmit();
   const actionData = useActionData();
@@ -122,6 +165,26 @@ export default function Index() {
     setFiles([]);
   };
 
+  const handleExportCSV = () => {
+    const headers = ["Product Title", "Image Filenames"];
+    const rows = productList.map(p => [`"${p.title.replace(/"/g, '""')}"`, `"${p.imageNames.replace(/"/g, '""')}"`]);
+    
+    const csvContent = [
+      headers.join(","),
+      ...rows.map(r => r.join(","))
+    ].join("\n");
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", "products_images_report.csv");
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleDeleteAll = () => {
     if (confirm("Are you sure you want to delete all job history?")) {
       submit({ actionType: "delete_all_jobs" }, { method: "POST" });
@@ -138,6 +201,26 @@ export default function Index() {
     <AppProvider i18n={enTranslations}>
       <Page title="Batch Image Uploader">
         <BlockStack gap="500">
+          {/* Dashboard Stats */}
+          <Layout>
+            <Layout.Section variant="oneHalf">
+              <Card>
+                <BlockStack gap="200">
+                  <Text variant="headingSm" as="h6" tone="subdued">Total Products</Text>
+                  <Text variant="headingLg" as="p">{productCount}</Text>
+                </BlockStack>
+              </Card>
+            </Layout.Section>
+            <Layout.Section variant="oneHalf">
+              <Card>
+                <BlockStack gap="200">
+                  <Text variant="headingSm" as="h6" tone="subdued">Total Images (Found)</Text>
+                  <Text variant="headingLg" as="p">{totalImagesCount}</Text>
+                </BlockStack>
+              </Card>
+            </Layout.Section>
+          </Layout>
+
           <Layout>
             <Layout.Section>
               <Card>
@@ -170,78 +253,113 @@ export default function Index() {
                   )}
                 </BlockStack>
               </Card>
-              <Layout.Section>
-                <Card padding="0">
-                  <div style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text variant="headingMd" as="h2">Execution History</Text>
-                    <Button 
-                      tone="critical" 
-                      variant="tertiary" 
-                      onClick={handleDeleteAll}
-                      disabled={jobs.length === 0}
-                    >
-                      Delete All History
-                    </Button>
-                  </div>
-                  <IndexTable
-                    resourceName={{ singular: 'upload job', plural: 'upload jobs' }}
-                    itemCount={jobs.length}
-                    headings={[
-                      { title: 'Job ID' },
-                      { title: 'Started' },
-                      { title: 'Finished' },
-                      { title: 'Duration' },
-                      { title: 'Status' },
-                      { title: 'Actions' },
-                    ]}
-                    selectable={false}
-                  >
-                    {jobs.map((job) => {
-                      const durationInSeconds = job.completedAt
-                        ? Math.floor((new Date(job.completedAt) - new Date(job.createdAt)) / 1000)
-                        : null;
+            </Layout.Section>
 
-                      return (
-                        <IndexTable.Row key={job.id} id={job.id} position={job.id}>
-                          <IndexTable.Cell>
-                            <Text variant="bodyMd" fontWeight="bold" as="span">#{job.id}</Text>
-                          </IndexTable.Cell>
-                          <IndexTable.Cell>
-                            {new Date(job.createdAt).toLocaleTimeString()}
-                          </IndexTable.Cell>
-                          <IndexTable.Cell>
-                            {job.completedAt ? new Date(job.completedAt).toLocaleTimeString() : "—"}
-                          </IndexTable.Cell>
-                          <IndexTable.Cell>
-                            {durationInSeconds !== null
-                              ? `${durationInSeconds}s`
-                              : <Text tone="subdued">Calculated on finish</Text>
-                            }
-                          </IndexTable.Cell>
-                          <IndexTable.Cell>
-                            <Badge tone={
-                              job.status === "COMPLETED" ? "success" : 
-                              job.status === "FAILED" ? "critical" : 
-                              job.status === "PROCESSING" ? "attention" : "info"
-                            }>
-                              {job.status}
-                            </Badge>
-                          </IndexTable.Cell>
-                          <IndexTable.Cell>
-                            <Button
-                              icon={DeleteIcon}
-                              tone="critical"
-                              variant="tertiary"
-                              onClick={() => handleDeleteJob(job.id)}
-                              accessibilityLabel={`Delete job ${job.id}`}
-                            />
-                          </IndexTable.Cell>
-                        </IndexTable.Row>
-                      );
-                    })}
-                  </IndexTable>
-                </Card>
-              </Layout.Section>
+            {/* Products and Images Table */}
+            <Layout.Section>
+              <Card padding="0">
+                <div style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text variant="headingMd" as="h2">Products and Images</Text>
+                  <Button variant="secondary" onClick={handleExportCSV}>
+                    Export CSV (Excel)
+                  </Button>
+                </div>
+                <IndexTable
+                  resourceName={{ singular: 'product', plural: 'products' }}
+                  itemCount={productList.length}
+                  headings={[
+                    { title: 'Product Title' },
+                    { title: 'Image Filenames' },
+                  ]}
+                  selectable={false}
+                >
+                  {productList.map((product, index) => (
+                    <IndexTable.Row key={product.id} id={product.id} position={index}>
+                      <IndexTable.Cell>
+                        <Text variant="bodyMd" fontWeight="bold" as="span">{product.title}</Text>
+                      </IndexTable.Cell>
+                      <IndexTable.Cell>
+                        <Text variant="bodyMd" as="span" tone="subdued">
+                          {product.imageNames || "No images"}
+                        </Text>
+                      </IndexTable.Cell>
+                    </IndexTable.Row>
+                  ))}
+                </IndexTable>
+              </Card>
+            </Layout.Section>
+
+            <Layout.Section>
+              <Card padding="0">
+                <div style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text variant="headingMd" as="h2">Execution History</Text>
+                  <Button 
+                    tone="critical" 
+                    variant="tertiary" 
+                    onClick={handleDeleteAll}
+                    disabled={jobs.length === 0}
+                  >
+                    Delete All History
+                  </Button>
+                </div>
+                <IndexTable
+                  resourceName={{ singular: 'upload job', plural: 'upload jobs' }}
+                  itemCount={jobs.length}
+                  headings={[
+                    { title: 'Job ID' },
+                    { title: 'Started' },
+                    { title: 'Finished' },
+                    { title: 'Duration' },
+                    { title: 'Status' },
+                    { title: 'Actions' },
+                  ]}
+                  selectable={false}
+                >
+                  {jobs.map((job) => {
+                    const durationInSeconds = job.completedAt
+                      ? Math.floor((new Date(job.completedAt) - new Date(job.createdAt)) / 1000)
+                      : null;
+
+                    return (
+                      <IndexTable.Row key={job.id} id={job.id} position={job.id}>
+                        <IndexTable.Cell>
+                          <Text variant="bodyMd" fontWeight="bold" as="span">#{job.id}</Text>
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>
+                          {new Date(job.createdAt).toLocaleTimeString()}
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>
+                          {job.completedAt ? new Date(job.completedAt).toLocaleTimeString() : "—"}
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>
+                          {durationInSeconds !== null
+                            ? `${durationInSeconds}s`
+                            : <Text tone="subdued">Calculated on finish</Text>
+                          }
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>
+                          <Badge tone={
+                            job.status === "COMPLETED" ? "success" : 
+                            job.status === "FAILED" ? "critical" : 
+                            job.status === "PROCESSING" ? "attention" : "info"
+                          }>
+                            {job.status}
+                          </Badge>
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>
+                          <Button
+                            icon={DeleteIcon}
+                            tone="critical"
+                            variant="tertiary"
+                            onClick={() => handleDeleteJob(job.id)}
+                            accessibilityLabel={`Delete job ${job.id}`}
+                          />
+                        </IndexTable.Cell>
+                      </IndexTable.Row>
+                    );
+                  })}
+                </IndexTable>
+              </Card>
             </Layout.Section>
           </Layout>
           <div style={{ height: '60px' }} />
